@@ -278,21 +278,21 @@ function compare_mps(mps1, mps2, R, N) # -> 2^N x 2^N Grid
     println("Error: $(norm(mps1_vals - mps2_vals))")
 end
 
-function apply_U_p_k_T(mps, u_c_p_k, center)
+function apply_U_p_k_T(mps, v_k, center)
     result_l = ITensor(1.0)
     result_r = ITensor(1.0)
 
     mps_p = prime(linkinds, mps)
 
     for i in 1:center-1
-        result_l *= dag(u_c_p_k[i]) * mps_p[i]
+        result_l *= dag(v_k[i]) * mps_p[i]
     end
 
     for i in length(s):-1:center+1
-        result_r *= dag(u_c_p_k[i]) * mps_p[i]
+        result_r *= dag(v_k[i]) * mps_p[i]
     end
 
-    return result_l * mps_p[center] * result_r
+    return mps_p[center] * result_l * result_r
 end
 
 function make_beta_k(u_c, u_c_p, k, center, delta_t, v, d1, d2, del, max_bond)
