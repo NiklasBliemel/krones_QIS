@@ -256,90 +256,73 @@ function plot_mps(mps, R, N; min=nothing, max=nothing) # -> 2^N x 2^N Grid
     end
 end
 
-function apply_U_p_k_T(mps, v_k, center)
+function contract_except_center(mps_left, mps_right, center)
     result_l = ITensor(1.0)
     result_r = ITensor(1.0)
 
-    mps_p = prime(linkinds, mps)
+    mps_p = prime(linkinds, mps_right)
 
     for i in 1:center-1
-        result_l *= dag(v_k[i]) * mps_p[i]
+        result_l *= dag(mps_left[i]) * mps_p[i]
     end
 
     for i in length(s):-1:center+1
-        result_r *= dag(v_k[i]) * mps_p[i]
+        result_r *= dag(mps_left[i]) * mps_p[i]
     end
 
     return mps_p[center] * result_l * result_r
 end
 
-function make_beta_k(v, a, b, k, center, delta_t, nu, d1, d2, del, max_bond)
-    b_del = [MPO(*(del, b[1]'')[:]), MPO(*(del, b[2]'')[:])]
-    b_k_d1 = [apply(d1[1], b[k]; alg="naive", maxdim=max_bond), apply(d1[2], b[k]; alg="naive", maxdim=max_bond)]
-    b_k_del_d1 = apply.(b_del, b_k_d1, maxdim=max_bond)
-    b_k_d2 = [apply(d2[1], b[k]; alg="naive", maxdim=max_bond), apply(d2[2], b[k]; alg="naive", maxdim=max_bond)]
+function make_beta(v1, v2, a1, a2, b1, b2, center, delta_t, nu, d1x, d1y, d2x, d2y, del, max_bond, cutoff)
+    b_dotx = MPO(*(del, b1'')[:])
+    b_doty = MPO(*(del, b2'')[:])
+    d1x_b1 = apply(d1x, b1; alg="naive", maxdim=max_bond, cutoff=cutoff)
+    d1x_b2 = apply(d1x, b2; alg="naive", maxdim=max_bond, cutoff=cutoff)
+    d1y_b1 = apply(d1y, b1; alg="naive", maxdim=max_bond, cutoff=cutoff)
+    d1y_b2 = apply(d1y, b2; alg="naive", maxdim=max_bond, cutoff=cutoff)
+    b_dotx_b1 = apply(b_dotx, b1; alg="naive", maxdim=max_bond, cutoff=cutoff)
+    b_dotx_b2 = apply(b_dotx, b2; alg="naive", maxdim=max_bond, cutoff=cutoff)
+    b_doty_b1 = apply(b_doty, b1; alg="naive", maxdim=max_bond, cutoff=cutoff)
+    b_doty_b2 = apply(b_doty, b2; alg="naive", maxdim=max_bond, cutoff=cutoff)
 
-    result = apply_U_p_k_T(a[k], v[k], center)
-    result += apply_U_p_k_T(-delta_t * b_k_del_d1[1], v[k], center)
-    result += apply_U_p_k_T(-delta_t * b_k_del_d1[2], v[k], center)
-    
-    result += apply_U_p_k_T(delta_t * nu * b_k_d2[1], v[k], center)
-    result += apply_U_p_k_T(delta_t * nu * b_k_d2[2], v[k], center)
+    B_1 = 1. * (apply(b_dotx, d1x_b1; alg="naive", maxdim=max_bond, cutoff=cutoff) + apply(b_doty, d1y_b1; alg="naive", maxdim=max_bond, cutoff=cutoff))
+    # B_1 += 0.5 * (apply(d1x, b_dotx_b1; alg="naive", maxdim=max_bond, cutoff=cutoff) + apply(d1y, b_doty_b1; alg="naive", maxdim=max_bond, cutoff=cutoff))
+    B_1 += -nu * (apply(d2x, b1; alg="naive", maxdim=max_bond, cutoff=cutoff) + apply(d2y, b1; alg="naive", maxdim=max_bond, cutoff=cutoff))
 
-    return array(result)
+    B_2 = 1. * (apply(b_dotx, d1x_b2; alg="naive", maxdim=max_bond, cutoff=cutoff) + apply(b_doty, d1y_b2; alg="naive", maxdim=max_bond, cutoff=cutoff))
+    # B_2 += 0.5 * (apply(d1x, b_dotx_b2; alg="naive", maxdim=max_bond, cutoff=cutoff) + apply(d1y, b_doty_b2; alg="naive", maxdim=max_bond, cutoff=cutoff))
+    B_2 += -nu * (apply(d2x, b2; alg="naive", maxdim=max_bond, cutoff=cutoff) + apply(d2y, b2; alg="naive", maxdim=max_bond, cutoff=cutoff))
+
+    out_1 = contract_except_center(v1, a1 - delta_t * B_1, center)
+    out_2 = contract_except_center(v2, a2 - delta_t * B_2, center)
+
+    return vcat(vec(array(out_1)), vec(array(out_2))) # combine into 1d-vector
 end
 
-function make_beta(v, a, b, center, delta_t, nu, d1, d2, del, max_bond)
-    return vcat(vec.([make_beta_k(v, a, b, 1, center, delta_t, nu, d1, d2, del, max_bond), 
-                      make_beta_k(v, a, b, 2, center, delta_t, nu, d1, d2, del, max_bond)])...)
+function get_c_vec(v1, v2, center)
+    return vcat(vec(array(v1[center])), vec(array(v2[center])))
 end
 
-function apply_H_k_j(c, u_c_p, d1, center, k, j, max_bond)
-    u_c_p[j][center] = ITensor(c[j], inds(u_c_p[j][center]))
-    result = apply(d1[j], u_c_p[j]; alg="naive", maxdim=max_bond)
-    result = apply(d1[k], result; alg="naive", maxdim=max_bond)
-    result = apply_U_p_k_T(result, u_c_p[k], center)
-    return result
+function insert_c_vec(c_vec, v1, v2, center)
+    length_1 = prod(size(v1[center]))
+    length_2 = prod(size(v2[center]))
+    out1 = deepcopy(v1)
+    out2 = deepcopy(v2)
+    out1[center] = ITensor(c_vec[1:length_1], inds(v1[center]))
+    out2[center] = ITensor(c_vec[length_1+1:length_1+length_2], inds(v2[center]))
+    return out1, out2
 end
 
-function apply_H(c_vec, u_c_p, d1, center, max_bond)
-    u_c_p_array = array.(getindex.(u_c_p, center))
-    u_c_p_shapes = size.(u_c_p_array)
-    u_c_p_lengths = length.(u_c_p_array)
-    c = [c_vec[1:u_c_p_lengths[1]], c_vec[u_c_p_lengths[1]+1:length(c_vec)]]
-    c = reshape.(c, u_c_p_shapes)
-    result_1 = apply_H_k_j(c, u_c_p, d1, center, 1, 1, max_bond) + apply_H_k_j(c, u_c_p, d1, center, 1, 2, max_bond)
-    result_2 = apply_H_k_j(c, u_c_p, d1, center, 2, 1, max_bond) + apply_H_k_j(c, u_c_p, d1, center, 2, 2, max_bond)
-    result_1 = vec(array(result_1))
-    result_2 = vec(array(result_2))
-    # result_2 = c_vec[u_c_p_lengths[1]+1:length(c_vec)]
-    return vcat(result_1, result_2)
-end
+function apply_H(c_vec, v1, v2, dx_dx, dy_dy, dx_dy, center, max_bond, cutoff)
+    v1_p, v2_p = insert_c_vec(c_vec, v1, v2, center)
 
-function place_c_vec!(u, c, center)
-    c_shapes = size.(array.(getindex.(u, center)))
-    c_lenghts = prod.(c_shapes)
-    c = reshape.([c[1:c_lenghts[1]], c[c_lenghts[1]+1:length(c)]], c_shapes)
-    u[1][center] = ITensor(c[1], inds(u[1][center]))
-    u[2][center] = ITensor(c[2], inds(u[2][center]))
-end
+    out_1 = apply(dx_dx, v1_p; alg="naive", maxdim=max_bond, cutoff=cutoff) + apply(dx_dy, v2_p; alg="naive", maxdim=max_bond, cutoff=cutoff)
+    out_2 = apply(dx_dy, v1_p; alg="naive", maxdim=max_bond, cutoff=cutoff) + apply(dy_dy, v2_p; alg="naive", maxdim=max_bond, cutoff=cutoff)
 
-function shape_c(u, c, center)
-    c_shapes = size.(array.(getindex.(u, center)))
-    c_lenghts = prod.(c_shapes)
-    return reshape.([c[1:c_lenghts[1]], c[c_lenghts[1]+1:length(c)]], c_shapes)
-end
+    out_1 = contract_except_center(v1, out_1, center)
+    out_2 = contract_except_center(v2, out_2, center)
 
-function place_c_vec(u, c, center)
-    c_shapes = size.(array.(getindex.(u, center)))
-    c_lenghts = prod.(c_shapes)
-    c = reshape.([c[1:c_lenghts[1]], c[c_lenghts[1]+1:length(c)]], c_shapes)
-    u_copy = deepcopy(u)
-    u_copy[1][center] = ITensor(c[1], inds(u[1][center]))
-    u_copy[2][center] = ITensor(c[2], inds(u[2][center]))
-    return u_copy
-end
-
-function get_c_vec(u, center)
-    return vcat(vec.(array.(getindex.(u, center)))...)
+    out = vcat(vec(array(out_1)), vec(array(out_2))) # combine into 1d-vector
+    out[abs.(out) .< cutoff] .= 0
+    return out
 end
