@@ -231,11 +231,14 @@ function plot_mps(mps, R, N; min=nothing, max=nothing) # -> 2^N x 2^N Grid
     xvals = collect(range(0, 1, 2^N))
     yvals = collect(range(0, 1, 2^N))
 
+    # establish grid
+    grid = DiscretizedGrid{2}(R, (0,0), (1,1); includeendpoint = true)
+
     mps_vals = fill(0.0, (2^N, 2^N))
 
     for x in 1:2^N
         for y in 1:2^N
-            mps_vals[y,x] = mps_tt(grididx_to_quantics(qgrid, (xvec[x], yvec[y])))
+            mps_vals[y,x] = mps_tt(grididx_to_quantics(grid, (xvec[x], yvec[y])))
         end
     end
 
@@ -285,18 +288,20 @@ function make_beta(v1, v2, a1, a2, b1, b2, center, delta_t, nu, d1x, d1y, d2x, d
     b_doty_b1 = apply(b_doty, b1; alg="naive", maxdim=max_bond, cutoff=cutoff)
     b_doty_b2 = apply(b_doty, b2; alg="naive", maxdim=max_bond, cutoff=cutoff)
 
-    B_1 = 1. * (apply(b_dotx, d1x_b1; alg="naive", maxdim=max_bond, cutoff=cutoff) + apply(b_doty, d1y_b1; alg="naive", maxdim=max_bond, cutoff=cutoff))
-    # B_1 += 0.5 * (apply(d1x, b_dotx_b1; alg="naive", maxdim=max_bond, cutoff=cutoff) + apply(d1y, b_doty_b1; alg="naive", maxdim=max_bond, cutoff=cutoff))
+    B_1 = 0.5 * (apply(b_dotx, d1x_b1; alg="naive", maxdim=max_bond, cutoff=cutoff) + apply(b_doty, d1y_b1; alg="naive", maxdim=max_bond, cutoff=cutoff))
+    B_1 += 0.5 * (apply(d1x, b_dotx_b1; alg="naive", maxdim=max_bond, cutoff=cutoff) + apply(d1y, b_doty_b1; alg="naive", maxdim=max_bond, cutoff=cutoff))
     B_1 += -nu * (apply(d2x, b1; alg="naive", maxdim=max_bond, cutoff=cutoff) + apply(d2y, b1; alg="naive", maxdim=max_bond, cutoff=cutoff))
 
-    B_2 = 1. * (apply(b_dotx, d1x_b2; alg="naive", maxdim=max_bond, cutoff=cutoff) + apply(b_doty, d1y_b2; alg="naive", maxdim=max_bond, cutoff=cutoff))
-    # B_2 += 0.5 * (apply(d1x, b_dotx_b2; alg="naive", maxdim=max_bond, cutoff=cutoff) + apply(d1y, b_doty_b2; alg="naive", maxdim=max_bond, cutoff=cutoff))
+    B_2 = 0.5 * (apply(b_dotx, d1x_b2; alg="naive", maxdim=max_bond, cutoff=cutoff) + apply(b_doty, d1y_b2; alg="naive", maxdim=max_bond, cutoff=cutoff))
+    B_2 += 0.5 * (apply(d1x, b_dotx_b2; alg="naive", maxdim=max_bond, cutoff=cutoff) + apply(d1y, b_doty_b2; alg="naive", maxdim=max_bond, cutoff=cutoff))
     B_2 += -nu * (apply(d2x, b2; alg="naive", maxdim=max_bond, cutoff=cutoff) + apply(d2y, b2; alg="naive", maxdim=max_bond, cutoff=cutoff))
 
     out_1 = contract_except_center(v1, a1 - delta_t * B_1, center)
     out_2 = contract_except_center(v2, a2 - delta_t * B_2, center)
 
-    return vcat(vec(array(out_1)), vec(array(out_2))) # combine into 1d-vector
+    out = vcat(vec(array(out_1)), vec(array(out_2))) # combine into 1d-vector
+    out[abs.(out) .< cutoff] .= 0
+    return out
 end
 
 function get_c_vec(v1, v2, center)
@@ -325,4 +330,17 @@ function apply_H(c_vec, v1, v2, dx_dx, dy_dy, dx_dy, center, max_bond, cutoff)
     out = vcat(vec(array(out_1)), vec(array(out_2))) # combine into 1d-vector
     out[abs.(out) .< cutoff] .= 0
     return out
+end
+
+function find_max_on_2D_grid(func, R, x_min=0., x_max=1., y_min=0., y_max=1.)
+    num_points_per_dim = 2^R
+    x_range = range(x_min, x_max, num_points_per_dim)
+    y_range = range(y_min, y_max, num_points_per_dim)
+    max_val = -Inf
+    for x in x_range
+        for y in y_range
+            max_val = max(max_val, func(x,y))
+        end
+    end
+    return max_val
 end
