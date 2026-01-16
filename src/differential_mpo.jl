@@ -255,7 +255,7 @@ function plot_mps(mps, R, N; min=nothing, max=nothing) # -> 2^N x 2^N Grid
         title!("Plot with clim")
         plot(p1, p2, layout=(1,2), size=(1000,400))
     else
-        plot(p1)
+        display(p1)
     end
 end
 
@@ -263,17 +263,19 @@ function contract_except_center(mps_left, mps_right, center)
     result_l = ITensor(1.0)
     result_r = ITensor(1.0)
 
-    mps_p = prime(linkinds, mps_right)
+    mps_left_p = prime(linkinds, mps_left)
 
     for i in 1:center-1
-        result_l *= dag(mps_left[i]) * mps_p[i]
+        result_l *= dag(mps_left_p[i]) * mps_right[i]
     end
 
     for i in length(s):-1:center+1
-        result_r *= dag(mps_left[i]) * mps_p[i]
+        result_r *= dag(mps_left_p[i]) * mps_right[i]
     end
 
-    return mps_p[center] * result_l * result_r
+    op = result_l * result_r
+
+    return mps_right[center] * op
 end
 
 function make_beta(v1, v2, a1, a2, b1, b2, center, delta_t, nu, d1x, d1y, d2x, d2y, del, max_bond, cutoff)
@@ -321,11 +323,13 @@ end
 function apply_H(c_vec, v1, v2, dx_dx, dy_dy, dx_dy, center, max_bond, cutoff)
     v1_p, v2_p = insert_c_vec(c_vec, v1, v2, center)
 
-    out_1 = apply(dx_dx, v1_p; alg="naive", maxdim=max_bond, cutoff=cutoff) + apply(dx_dy, v2_p; alg="naive", maxdim=max_bond, cutoff=cutoff)
-    out_2 = apply(dx_dy, v1_p; alg="naive", maxdim=max_bond, cutoff=cutoff) + apply(dy_dy, v2_p; alg="naive", maxdim=max_bond, cutoff=cutoff)
+    out_1_a = apply(dx_dx, v1_p; alg="naive", maxdim=max_bond, cutoff=cutoff)
+    out_1_b = apply(dx_dy, v2_p; alg="naive", maxdim=max_bond, cutoff=cutoff)
+    out_2_a = apply(dx_dy, v1_p; alg="naive", maxdim=max_bond, cutoff=cutoff)
+    out_2_b = apply(dy_dy, v2_p; alg="naive", maxdim=max_bond, cutoff=cutoff)
 
-    out_1 = contract_except_center(v1, out_1, center)
-    out_2 = contract_except_center(v2, out_2, center)
+    out_1 = contract_except_center(v1_p, out_1_a, center) + contract_except_center(v1_p, out_1_b, center)
+    out_2 = contract_except_center(v2_p, out_2_a, center) + contract_except_center(v2_p, out_2_b, center)
 
     out = vcat(vec(array(out_1)), vec(array(out_2))) # combine into 1d-vector
     out[abs.(out) .< cutoff] .= 0
