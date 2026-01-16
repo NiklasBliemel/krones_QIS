@@ -263,19 +263,17 @@ function contract_except_center(mps_left, mps_right, center)
     result_l = ITensor(1.0)
     result_r = ITensor(1.0)
 
-    mps_left_p = prime(linkinds, mps_left)
+    mps_right_p = prime(linkinds, mps_right)
 
     for i in 1:center-1
-        result_l *= dag(mps_left_p[i]) * mps_right[i]
+        result_l *= dag(mps_left[i]) * mps_right_p[i]
     end
 
     for i in length(s):-1:center+1
-        result_r *= dag(mps_left_p[i]) * mps_right[i]
+        result_r *= dag(mps_left[i]) * mps_right_p[i]
     end
-
-    op = result_l * result_r
-
-    return mps_right[center] * op
+    out = noprime(mps_right_p[center] * result_l * result_r)
+    return permute(out, inds(mps_left[center]), allow_alias=true)
 end
 
 function make_beta(v1, v2, a1, a2, b1, b2, center, delta_t, nu, d1x, d1y, d2x, d2y, del, max_bond, cutoff)
